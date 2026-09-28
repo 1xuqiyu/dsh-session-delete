@@ -337,6 +337,31 @@ check("一键清空把保留期内的堆也收掉",
 check("清空后回收目录没有残留", (await exists(freshTrash)) === false);
 check("再按一次如实报 0", (await call("/api/session.delete.prune", { emptyTrash: true })).payload.trashRemoved === 0);
 
+// ── 7e. 自定义保留天数：retentionDays 覆盖默认 30 天 ─────────────────────────
+// 重新造一个「40 天前」的堆和几个刚删的堆，用不同保留期各对账一次喵。
+const oldTrash2 = join(trashBaseDir, `${oldStamp}-ui2`, "--test-project--", TARGET);
+await mkdir(oldTrash2, { recursive: true });
+await writeFile(join(oldTrash2, "a.bin"), "x".repeat(64), "utf8");
+const freshTrash2 = join(trashBaseDir, `${new Date().toISOString().replace(/[:.]/g, "-")}-ui`, "--test-project--", OTHER);
+await mkdir(freshTrash2, { recursive: true });
+await writeFile(join(freshTrash2, "a.bin"), "y".repeat(64), "utf8");
+
+const withZero = await call("/api/session.delete.prune", { retentionDays: 0 });
+check("retentionDays=0 时连保留期内的堆也一起清",
+  withZero.payload.trashRemoved >= 1 && (await exists(freshTrash2)) === false, withZero.payload);
+
+// 再造一个 40 天旧堆：长保留期（3650 天）不该清它，短保留期（7 天）才清喵。
+const oldTrash3 = join(trashBaseDir, `${oldStamp}-ui3`, "--test-project--", TARGET);
+await mkdir(oldTrash3, { recursive: true });
+await writeFile(join(oldTrash3, "b.bin"), "z".repeat(64), "utf8");
+const longKeep = await call("/api/session.delete.prune", { retentionDays: 3650 });
+check("retentionDays=3650 时 40 天的旧堆也被保留",
+  longKeep.payload.trashRemoved === 0 && (await exists(oldTrash3)) === true,
+  longKeep.payload);
+const shortKeep = await call("/api/session.delete.prune", { retentionDays: 7 });
+check("retentionDays=7 时 40 天的旧堆被清", shortKeep.payload.trashRemoved >= 1, shortKeep.payload);
+check("旧堆目录已消失", (await exists(oldTrash3)) === false);
+
 // ── 8. 遗留聚合 ───────────────────────────────────────────────────────────
 const agg = JSON.parse(await readFile(aggregate, "utf8"));
 check("遗留聚合里目标已删", agg.tables.sessions[TARGET] === void 0, Object.keys(agg.tables.sessions));
