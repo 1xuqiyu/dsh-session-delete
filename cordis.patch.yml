@@ -1,0 +1,6 @@
+# 把「会话清理」面板的 Host 半包挂进 web profile。
+# 只 insert 一条 loader 条目：注册 /api/session.delete* 三条路由。
+# 注意：不要再往 profiles/web/cordis.patch.yml 里手写同一条，否则 duplicate loader entry id。
+- insert:
+    - id: dsh-session-delete
+      name: dsh-session-delete
