@@ -72,6 +72,17 @@ await writeFile(aggregate, JSON.stringify({
   tables: { sessions: { [TARGET]: { rows: {} }, [OTHER]: { rows: {} } } }
 }, null, 2), "utf8");
 
+// 回收目录里两个假堆：一个 40 天前的旧堆（对账时应被清）、一个刚删的新堆（保留期内必须不动）。
+const trashBaseDir = join(root, ".sessions-trash");
+const oldStamp = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString().replace(/[:.]/g, "-");
+const freshStamp = new Date().toISOString().replace(/[:.]/g, "-");
+const oldTrash = join(trashBaseDir, `${oldStamp}-ui`, "--test-project--", TARGET);
+const freshTrash = join(trashBaseDir, `${freshStamp}-ui`, "--test-project--", OTHER);
+await mkdir(oldTrash, { recursive: true });
+await writeFile(join(oldTrash, "session.v3.jsonl.zstd"), "old trash".repeat(10), "utf8");
+await mkdir(freshTrash, { recursive: true });
+await writeFile(join(freshTrash, "session.v3.jsonl.zstd"), "fresh trash".repeat(10), "utf8");
+
 // 关键：**故意不设 DSH_SESSION_ID**，逼「当前会话」保护只能靠浏览器上报，
 // 这正是 `dsh web` 主进程里的真实情形喵。
 delete process.env.DSH_SESSION_ID;
@@ -309,6 +320,22 @@ check("已删干净的孤儿如实记进 skipped（目录早没了只剩记忆�
 const pruned2 = await call("/api/session.delete.prune", {});
 check("prune 第二轮收掉孙代理", pruned2.payload.orphans === 1 && pruned2.payload.orphanBytes === 16, pruned2.payload);
 check("孙代理目录也消失了", (await exists(sub2Dir)) === false);
+
+// ── 7c. 回收目录保留期：默认 30 天，过期的清、保留期内的不动 ──────────────────
+// 40 天的旧堆在第一轮对账（第 7 节）就该被清掉；测试过程里各次删除新建的堆
+// 时间戳都是「现在」，必须原封不动喵。
+check("第一轮对账就清掉过期回收堆", pruned.payload.trashRemoved >= 1, pruned.payload);
+check("过期的回收堆已消失", (await exists(join(trashBaseDir, `${oldStamp}-ui`))) === false);
+check("保留期内的回收堆原封不动",
+  pruned2.payload.trashKept >= 1 && (await exists(freshTrash)) === true,
+  { kept: pruned2.payload.trashKept, trashRemoved: pruned2.payload.trashRemoved });
+
+// ── 7d. 一键清空回收目录：真销毁，剩下的全收 ──────────────────────────────────
+const emptied = await call("/api/session.delete.prune", { emptyTrash: true });
+check("一键清空把保留期内的堆也收掉",
+  emptied.payload.trashRemoved >= 1 && emptied.payload.trashFreedBytes >= 100, emptied.payload);
+check("清空后回收目录没有残留", (await exists(freshTrash)) === false);
+check("再按一次如实报 0", (await call("/api/session.delete.prune", { emptyTrash: true })).payload.trashRemoved === 0);
 
 // ── 8. 遗留聚合 ───────────────────────────────────────────────────────────
 const agg = JSON.parse(await readFile(aggregate, "utf8"));

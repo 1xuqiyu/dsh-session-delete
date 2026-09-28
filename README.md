@@ -43,7 +43,7 @@ dsh plugin --profile web remove dsh-session-delete
 
 * `GET  /api/session.delete.list` —— 列出磁盘上所有会话（含侧栏故意隐藏的 `origin: subagent` 记录），带标题 / 回合 / 大小 / 归档 / live / running / current 标记
 * `POST /api/session.delete` —— body `{"sessionId": "session-...", "currentSessionId": "session-...", "cascade": true}`，删一条（`currentSessionId` 由浏览器上报，因为 `DSH_SESSION_ID` 只注入子进程、主进程里读不到）。**`cascade: true`（面板默认勾选）时先按 `parentSession` 收集整棵后代链（含孙代理），父删完顺手把还在磁盘上的子代理一起搬进同一个回收目录**；正在跑 / 是当前会话的子代理只跳过、不失败，如实记进 `skippedChildren`
-* `POST /api/session.delete.prune` —— 全量对账，把目录已不存在的归档死引用 / 工作区死归属 / 幽灵分片一次扫干净；顺带**清孤儿子代理**：`origin: "subagent"` 且 `parentSession` 已不在磁盘上的记录一并收掉，父还活着的一律不动。进场先拍一次 onDisk 快照，所以孤儿是**逐轮向内收敛**的（第一轮收走快照时父已不在的，下一轮才轮到孙代理），多按一次「对账 + 清孤儿」就干净了
+* `POST /api/session.delete.prune` —— 全量对账，把目录已不存在的归档死引用 / 工作区死归属 / 幽灵分片一次扫干净；顺带**清孤儿子代理**：`origin: "subagent"` 且 `parentSession` 已不在磁盘上的记录一并收掉，父还活着的一律不动。进场先拍一次 onDisk 快照，所以孤儿是**逐轮向内收敛**的（第一轮收走快照时父已不在的，下一轮才轮到孙代理），多按一次「对账 + 清孤儿」就干净了。**还管回收目录的账**：默认清掉超过 30 天的旧堆（保留期内随时可反悔），body 带 `{"emptyTrash": true}` 则一键全清（面板上二次确认）——这是真销毁，清了就反悔不了；响应里 `trashRemoved` / `trashFreedBytes` / `trashKept` 如实报账喵。
 
 ## 安全栏
 
@@ -62,4 +62,4 @@ dsh plugin --profile web remove dsh-session-delete
 node D:\gongzuo\dsh-plugins\dsh-session-delete\tests\offline.mjs
 ```
 
-在临时 `DSH_HOME` 里造假会话 + 分片 + 遗留聚合，用 stub ctx 直接调注册进 Connection 的路由，**61 项断言**覆盖：路由注册、列表（含子代理标记与 `parent` 指针）、拒删自己、拒路径穿越、404、删除后的磁盘效果（邻居不误删、进回收目录）、内存效果（归属/归档/分片同步）、遗留聚合、对账路由，外加 2026-09-28 真机踩到的五个坑 —— 句柄占用时走 `copied` 兜底、live 会话先刷盘再摘、当前会话只能靠上报、append 临界区回 409 且不动文件、没有 `flush` 接口时如实警告；以及本轮新增的级联与孤儿覆盖 —— 不带 `cascade` 时子代理原封不动、带 `cascade` 时连子代理一起收（响应如实报 `children`/`skippedChildren` 与合并字节数）、对账逐轮收敛清孤儿且不误删父还活着的。不碰真实数据喵。
+在临时 `DSH_HOME` 里造假会话 + 分片 + 遗留聚合，用 stub ctx 直接调注册进 Connection 的路由，**67 项断言**覆盖：路由注册、列表（含子代理标记与 `parent` 指针）、拒删自己、拒路径穿越、404、删除后的磁盘效果（邻居不误删、进回收目录）、内存效果（归属/归档/分片同步）、遗留聚合、对账路由，外加 2026-09-28 真机踩到的五个坑 —— 句柄占用时走 `copied` 兜底、live 会话先刷盘再摘、当前会话只能靠上报、append 临界区回 409 且不动文件、没有 `flush` 接口时如实警告；以及本轮新增的级联与孤儿覆盖 —— 不带 `cascade` 时子代理原封不动、带 `cascade` 时连子代理一起收（响应如实报 `children`/`skippedChildren` 与合并字节数）、对账逐轮收敛清孤儿且不误删父还活着的；以及回收目录保留期 —— 过期堆被清、保留期内不动、`emptyTrash` 一键全清且二次确认后才生效。不碰真实数据喵。
